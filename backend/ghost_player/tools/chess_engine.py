@@ -8,6 +8,8 @@ import random
 
 import chess
 
+from . import game_state
+
 
 def get_game_status(fen: str) -> dict:
     """Get the current status of a chess game from a FEN string.
@@ -138,23 +140,28 @@ def validate_move(fen: str, move_uci: str) -> dict:
     }
 
 
-def suggest_move(fen: str, difficulty: str = "medium") -> dict:
+def suggest_move(fen: str, difficulty: str = "") -> dict:
     """Compute the AI's next move for the given position.
 
     Use this tool when it's your turn (Black) and you need to decide
-    what move to play. Choose a difficulty level:
+    what move to play. The difficulty level is read from the game settings
+    unless you override it here:
     - 'easy': picks a random legal move
     - 'medium': evaluates material balance, picks a good move (depth 2)
     - 'hard': deeper search for strong play (depth 3)
 
     Args:
         fen: A FEN string representing the current board position.
-        difficulty: One of 'easy', 'medium', or 'hard'. Defaults to 'medium'.
+        difficulty: One of 'easy', 'medium', or 'hard'. Leave empty to
+                    use the current game difficulty setting.
 
     Returns:
         A dictionary with the chosen move in UCI and SAN formats,
         the resulting FEN, and a brief evaluation.
     """
+    if not difficulty:
+        difficulty = game_state.get_difficulty()
+
     try:
         board = chess.Board(fen)
     except ValueError:
@@ -178,13 +185,132 @@ def suggest_move(fen: str, difficulty: str = "medium") -> dict:
         eval_comment = _eval_comment(score)
 
     san = board.san(move)
+    uci = move.uci()
     board.push(move)
+    resulting_fen = board.fen()
+
+    # Record AI's move in shared game state
+    game_state.record_move(fen, uci)
 
     return {
-        "move_uci": move.uci(),
+        "move_uci": uci,
         "move_san": san,
-        "resulting_fen": board.fen(),
+        "resulting_fen": resulting_fen,
         "evaluation": eval_comment,
+        "difficulty": difficulty,
+    }
+
+
+def apply_move(fen: str, move: str) -> dict:
+    """Apply a move spoken by the player to the given position.
+
+    Use this tool as a fallback when the camera can't detect the player's
+    move. The player says their move out loud (e.g., "e4", "knight to f3",
+    "castle kingside") and you parse it into either:
+    - SAN format (e.g., "e4", "Nf3", "O-O", "Qxd5", "e8=Q")
+    - UCI format (e.g., "e2e4", "g1f3", "e1g1")
+
+    The tool accepts either format and will figure out which one it is.
+    The move is validated and recorded in the game history.
+
+    Args:
+        fen: A FEN string representing the current board position.
+        move: The move in SAN format ("Nf3", "O-O") or UCI format ("g1f3").
+
+    Returns:
+        A dictionary with the validated move details and resulting FEN,
+        or an error if the move is invalid/illegal.
+    """
+    try:
+        board = chess.Board(fen)
+    except ValueError:
+        return {"error": f"Invalid FEN string: {fen}"}
+
+    move = move.strip()
+    chess_move: chess.Move | None = None
+
+    # Try UCI first
+    try:
+        candidate = chess.Move.from_uci(move)
+        if candidate in board.legal_moves:
+            chess_move = candidate
+    except ValueError:
+        pass
+
+    # Try SAN if UCI didn't work
+    if chess_move is None:
+        try:
+            chess_move = board.parse_san(move)
+        except (chess.InvalidMoveError, chess.IllegalMoveError, chess.AmbiguousMoveError) as e:
+            return {
+                "error": f"Could not parse '{move}' as a legal move: {e}",
+                "hint": "Try UCI format (e.g., 'e2e4') or standard notation (e.g., 'Nf3', 'O-O').",
+            }
+
+    if chess_move is None or chess_move not in board.legal_moves:
+        return {
+            "error": f"'{move}' is not a legal move in this position.",
+            "legal_moves_sample": [board.san(m) for m in list(board.legal_moves)[:10]],
+        }
+
+    san = board.san(chess_move)
+    uci = chess_move.uci()
+    side = "white" if board.turn == chess.WHITE else "black"
+
+    # Record in shared game state
+    game_state.record_move(fen, uci)
+
+    board.push(chess_move)
+    resulting_fen = board.fen()
+
+    return {
+        "move_uci": uci,
+        "move_san": san,
+        "side": side,
+        "resulting_fen": resulting_fen,
+        "message": f"{side.title()} played {san}.",
+    }
+
+
+def get_move_history() -> dict:
+    """Get the list of all moves played so far in this game.
+
+    Use this tool when the player asks about the game history, wants to
+    know what moves have been played, or when you want to reference past
+    moves in your commentary (e.g., "That's your third pawn move in a row").
+
+    Returns:
+        A dictionary with the full move list and a PGN-like summary string.
+    """
+    state = game_state.get_state()
+    history = state["move_history"]
+
+    if not history:
+        return {
+            "moves": [],
+            "total": 0,
+            "pgn": "",
+            "message": "No moves have been played yet.",
+        }
+
+    # Build PGN-like summary
+    pgn_parts: list[str] = []
+    current_move_num = 0
+    for entry in history:
+        mn = entry["move_number"]
+        if entry["side"] == "white":
+            current_move_num = mn
+            pgn_parts.append(f"{mn}. {entry['move_san']}")
+        else:
+            if mn != current_move_num:
+                pgn_parts.append(f"{mn}...")
+            pgn_parts.append(entry["move_san"])
+
+    return {
+        "moves": history,
+        "total": len(history),
+        "pgn": " ".join(pgn_parts),
+        "current_fen": state["current_fen"],
     }
 
 

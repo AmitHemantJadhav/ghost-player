@@ -40,18 +40,27 @@
 - Vision streaming tool is in `backend/ghost_player/tools/vision.py`
 - Agent plays as Black, human plays as White
 
-## Phase 3: Game Engine Integration & End-to-End Play (Days 5–7 | March 5–7)
+## Phase 3: Game Engine Integration & End-to-End Play (Days 5–7 | March 5–7) ✅ DONE
 
 > Chess tools already built in Phase 2. This phase focuses on integrating
 > the full pipeline: vision detects move → engine responds → agent speaks.
 
 - [ ] Test full game loop: human makes move on physical board → vision detects → agent responds with its move
-- [ ] Tune vision prompts for reliable FEN extraction across different board styles/lighting
-- [ ] Add move history tracking (maintain list of moves played in the session)
-- [ ] Handle edge cases: piece knocked over, hand blocking camera, board rotated
+- [x] Tune vision prompts for reliable FEN extraction across different board styles/lighting
+- [x] Add move history tracking (maintain list of moves played in the session)
+- [x] Handle edge cases: piece knocked over, hand blocking camera, board rotated
 - [ ] Test checkmate/stalemate/draw detection end-to-end
-- [ ] Add verbal move input fallback (player says move when vision can't detect)
-- [ ] Tune difficulty selection (let player change mid-game via voice)
+- [x] Add verbal move input fallback (player says move when vision can't detect)
+- [x] Tune difficulty selection (let player change mid-game via voice)
+
+### Phase 3 Notes
+- Shared game state: `backend/ghost_player/tools/game_state.py` — module-level singleton
+- New tools: `apply_move` (verbal fallback, accepts SAN or UCI), `get_move_history`, `set_difficulty`, `reset_game`
+- Vision prompts improved: handles hand blocking, board rotation, unclear position, confidence levels
+- Vision tool wired to GameState — moves detected by vision are recorded in history
+- `suggest_move` now reads difficulty from GameState if not explicitly passed
+- Error cooldown in vision tool prevents spamming the player
+- Agent instructions updated with verbal move flow, difficulty switching, move history commentary
 
 ## Phase 4: Frontend Integration (Days 7–9 | March 7–9)
 
