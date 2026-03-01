@@ -7,7 +7,7 @@
 
 ---
 
-## Phase 1: Scaffolding (Days 1–2 | March 1–2)
+## Phase 1: Scaffolding (Days 1–2 | March 1–2) ✅ DONE
 
 - [x] Write research report and CLAUDE.md
 - [x] Create project scaffolding (backend + frontend)
@@ -17,28 +17,41 @@
 - [x] Set up Tailwind CSS
 - [x] Create landing page with placeholder UI sections
 - [x] Write project README with quick-start instructions
-- [ ] Verify `adk web` loads the agent in dev UI
-- [ ] Verify frontend dev server runs
+- [x] Verify `adk web` loads the agent in dev UI
+- [x] Verify frontend dev server runs
 
-## Phase 2: Core Agent — Voice & Vision (Days 3–5 | March 3–5)
+## Phase 2: Core Agent — Voice & Vision (Days 3–5 | March 3–5) ✅ DONE
 
-- [ ] Get basic voice interaction working via `adk web` (speak to agent, hear response)
-- [ ] Build vision streaming tool — accept `LiveRequestQueue`, process camera frames
-- [ ] Test vision tool: point camera at chessboard, confirm agent describes what it sees
-- [ ] Build board state parser — extract piece positions from Gemini vision output
-- [ ] Define structured game state format (FEN string for chess)
-- [ ] Wire up session resumption for 2-min video session limit (ADK RunConfig)
+- [x] Get basic voice interaction working via `adk web` (speak to agent, hear response)
+- [x] Build vision streaming tool — accept `LiveRequestQueue`, process camera frames
+- [x] Test vision tool: point camera at chessboard, confirm agent describes what it sees
+- [x] Build board state parser — extract piece positions from Gemini vision output (FEN via Gemini 2.5 Flash)
+- [x] Define structured game state format (FEN string for chess)
+- [x] Build chess tools using python-chess (`get_game_status`, `get_legal_moves`, `validate_move`, `suggest_move`)
+- [x] Minimax engine with alpha-beta pruning (easy/medium/hard difficulty)
+- [ ] Wire up session resumption for 2-min video session limit (ADK RunConfig) — deferred to Phase 4
 
-## Phase 3: Game Engine (Days 5–7 | March 5–7)
+### Phase 2 Notes
+- Voice, camera, and chess tools all verified working in `adk web`
+- Vision tool uses separate `gemini-2.5-flash` model call (not the live model)
+- `LiveRequestQueue` import: `from google.adk.agents import LiveRequestQueue` (ADK 1.18.0)
+- Camera + mic must both be enabled BEFORE starting session in ADK dev UI
+- Chess engine tools are in `backend/ghost_player/tools/chess_engine.py`
+- Vision streaming tool is in `backend/ghost_player/tools/vision.py`
+- Agent plays as Black, human plays as White
 
-- [ ] Build chess tools using python-chess:
-  - [ ] `get_legal_moves(fen: str)` — returns legal moves for current position
-  - [ ] `evaluate_position(fen: str)` — basic position evaluation
-  - [ ] `suggest_move(fen: str, difficulty: str)` — pick a move at given difficulty
-  - [ ] `validate_move(fen: str, move: str)` — check if a move is legal
-- [ ] Integrate vision → game engine pipeline: camera sees board → FEN → move suggestion
-- [ ] Agent speaks its move and waits for human to play
-- [ ] Handle turn tracking (whose turn is it?)
+## Phase 3: Game Engine Integration & End-to-End Play (Days 5–7 | March 5–7)
+
+> Chess tools already built in Phase 2. This phase focuses on integrating
+> the full pipeline: vision detects move → engine responds → agent speaks.
+
+- [ ] Test full game loop: human makes move on physical board → vision detects → agent responds with its move
+- [ ] Tune vision prompts for reliable FEN extraction across different board styles/lighting
+- [ ] Add move history tracking (maintain list of moves played in the session)
+- [ ] Handle edge cases: piece knocked over, hand blocking camera, board rotated
+- [ ] Test checkmate/stalemate/draw detection end-to-end
+- [ ] Add verbal move input fallback (player says move when vision can't detect)
+- [ ] Tune difficulty selection (let player change mid-game via voice)
 
 ## Phase 4: Frontend Integration (Days 7–9 | March 7–9)
 
