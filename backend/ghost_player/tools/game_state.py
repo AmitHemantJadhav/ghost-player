@@ -8,6 +8,9 @@ This is single-session / in-process state — fine for the hackathon.
 For production, swap to Firestore-backed session storage.
 """
 
+import threading
+import time
+
 import chess
 
 
@@ -155,3 +158,33 @@ def get_difficulty() -> str:
 def get_current_fen() -> str:
     """Return the current FEN from game state. Internal helper."""
     return _state.current_fen
+
+
+# ---------------------------------------------------------------------------
+# Shared frame buffer — video frames stored here by server.py, read by vision.py
+# ---------------------------------------------------------------------------
+_frame_lock = threading.Lock()
+_latest_frame: bytes | None = None
+_frame_timestamp: float = 0.0
+
+
+def store_frame(frame_bytes: bytes) -> None:
+    """Store the latest camera frame. Called by the server when an image blob arrives."""
+    global _latest_frame, _frame_timestamp
+    with _frame_lock:
+        _latest_frame = frame_bytes
+        _frame_timestamp = time.monotonic()
+
+
+def get_latest_frame() -> tuple[bytes | None, float]:
+    """Return (frame_bytes, timestamp) of the most recent camera frame."""
+    with _frame_lock:
+        return _latest_frame, _frame_timestamp
+
+
+def clear_frame_buffer() -> None:
+    """Clear the frame buffer. Called on session reset."""
+    global _latest_frame, _frame_timestamp
+    with _frame_lock:
+        _latest_frame = None
+        _frame_timestamp = 0.0

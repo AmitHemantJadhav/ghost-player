@@ -47,3 +47,28 @@ export interface PlayerMessage {
   /** Optional associated game event */
   gameEvent: "move" | "capture" | "check" | "checkmate" | "chat" | null;
 }
+
+/** A transcript entry for the live conversation log. */
+export interface TranscriptEntry {
+  id: string;
+  sender: "player" | "ghost_player" | "system";
+  content: string;
+  timestamp: number;
+  /** Whether the message is still being streamed (not yet finalized). */
+  finished: boolean;
+}
+
+/** Game state snapshot from the backend (matches game_state.snapshot()). */
+export interface ServerGameState {
+  current_fen: string;
+  move_history: Array<{
+    move_number: number;
+    side: "white" | "black";
+    move_san: string;
+    move_uci: string;
+    fen_after: string;
+  }>;
+  difficulty: "easy" | "medium" | "hard";
+  started: boolean;
+  total_moves: number;
+}

@@ -1,7 +1,8 @@
 """Streaming vision tool for board analysis.
 
-Uses ADK's LiveRequestQueue to receive camera frames, then calls
-Gemini 2.5 Flash (non-live model) for vision analysis of the board.
+Reads camera frames from a shared frame buffer (written by server.py),
+then calls Gemini 2.5 Flash for vision analysis. Video frames are kept
+completely separate from the Live API audio stream.
 """
 
 import asyncio
@@ -11,7 +12,6 @@ from collections.abc import AsyncGenerator
 
 import chess
 from google import genai
-from google.adk.agents import LiveRequestQueue
 from google.genai import types
 
 from . import game_state
@@ -107,38 +107,17 @@ Important guidelines:
 - If you see multiple pieces moved, it might be castling — check for that."""
 
 
-def _drain_queue_keep_latest(input_stream: LiveRequestQueue) -> tuple[bytes | None, bool]:
-    """Drain all pending frames from the queue, keeping only the latest JPEG.
-
-    LiveRequestQueue buffers frames as they arrive. We only need the
-    most recent one since board games don't require frame-by-frame analysis.
+def _get_new_frame(last_timestamp: float) -> tuple[bytes | None, float]:
+    """Get the latest frame from the shared buffer if it's newer than last_timestamp.
 
     Returns:
-        A tuple of (frame_bytes, closed). frame_bytes is None if no frame
-        was available. closed is True if the stream was closed.
+        A tuple of (frame_bytes, timestamp). frame_bytes is None if no new
+        frame is available since last_timestamp.
     """
-    latest_frame: bytes | None = None
-    closed = False
-
-    # Access the underlying asyncio.Queue for non-blocking drain
-    queue = input_stream._queue
-
-    while True:
-        try:
-            item = queue.get_nowait()
-        except asyncio.QueueEmpty:
-            break
-
-        # LiveRequest with close=True signals end-of-stream
-        if hasattr(item, "close") and item.close:
-            closed = True
-            break
-
-        # Extract JPEG bytes from the LiveRequest
-        if hasattr(item, "blob") and item.blob and item.blob.data:
-            latest_frame = item.blob.data
-
-    return latest_frame, closed
+    frame, timestamp = game_state.get_latest_frame()
+    if frame is not None and timestamp > last_timestamp:
+        return frame, timestamp
+    return None, last_timestamp
 
 
 async def _analyze_frame(
@@ -165,6 +144,11 @@ async def _analyze_frame(
         prompt = _DIFF_PROMPT_TEMPLATE.format(
             last_fen=last_fen, turn=turn, move_number=move_number,
         )
+
+    # Defensive: if data arrived as base64 string instead of bytes, decode it
+    if isinstance(frame_bytes, str):
+        import base64
+        frame_bytes = base64.b64decode(frame_bytes)
 
     image_part = types.Part.from_bytes(data=frame_bytes, mime_type="image/jpeg")
     text_part = types.Part.from_text(text=prompt)
@@ -232,14 +216,13 @@ def _validate_detected_move(fen: str, move_uci: str) -> bool:
         return False
 
 
-async def analyze_board(
-    input_stream: LiveRequestQueue,
-) -> AsyncGenerator[str, None]:
+async def analyze_board() -> AsyncGenerator[str, None]:
     """Continuously watch the chess board through the camera and detect moves.
 
-    This is a streaming tool that receives camera frames via the input_stream.
-    It analyzes the board position using Gemini vision, detects when moves are
-    made, and reports changes to the agent.
+    This tool reads camera frames from a shared buffer (frames are stored
+    by the server when the frontend sends image blobs). It analyzes the
+    board position using Gemini vision, detects when moves are made, and
+    reports changes to the agent.
 
     The tool starts by detecting the initial board position from the first
     clear frame. After that, it watches for changes and reports each new
@@ -254,21 +237,26 @@ async def analyze_board(
     last_fen: str | None = None
     frames_without_board = 0
     last_error_time: float = 0.0
+    last_frame_timestamp: float = 0.0
+    no_frame_count = 0
 
-    yield "Starting board analysis. Point your camera at the chess board..."
+    yield "Starting board analysis. I'll watch for your camera frames..."
 
     while True:
         await asyncio.sleep(_POLL_INTERVAL)
 
-        # Drain queue, keep only the latest frame
-        frame, closed = _drain_queue_keep_latest(input_stream)
-
-        if closed:
-            yield "Camera stream ended."
-            break
+        # Get latest frame from the shared buffer
+        frame, new_timestamp = _get_new_frame(last_frame_timestamp)
 
         if frame is None:
+            no_frame_count += 1
+            # After 15 polls (~30s) with no frames, hint the player
+            if no_frame_count == 15:
+                yield "I don't see any camera frames yet. Make sure your camera is turned on and pointed at the board."
             continue
+
+        no_frame_count = 0
+        last_frame_timestamp = new_timestamp
 
         # Analyze the frame
         result = await _analyze_frame(client, frame, last_fen)

@@ -62,16 +62,28 @@
 - Error cooldown in vision tool prevents spamming the player
 - Agent instructions updated with verbal move flow, difficulty switching, move history commentary
 
-## Phase 4: Frontend Integration (Days 7–9 | March 7–9)
+## Phase 4: Frontend Integration (Days 7–9 | March 7–9) ✅ DONE
 
-- [ ] Set up WebSocket connection between frontend and backend
-- [ ] Stream webcam video from browser to backend via WebSocket
-- [ ] Stream audio from browser mic to backend
-- [ ] Play agent audio responses in browser
-- [ ] Display game state in frontend (board position, move history)
-- [ ] Display chat/transcript log with agent messages
-- [ ] Wire up mic toggle and camera toggle buttons
-- [ ] Build FastAPI WebSocket endpoint that bridges to ADK `run_live()`
+- [x] Set up WebSocket connection between frontend and backend
+- [x] Stream webcam video from browser to backend via WebSocket
+- [x] Stream audio from browser mic to backend
+- [x] Play agent audio responses in browser
+- [x] Display game state in frontend (board position, move history)
+- [x] Display chat/transcript log with agent messages
+- [x] Wire up mic toggle and camera toggle buttons
+- [x] Build FastAPI WebSocket endpoint that bridges to ADK `run_live()`
+
+### Phase 4 Notes
+- Backend: `backend/ghost_player/server.py` — FastAPI WebSocket server following `adk_web_server.py` pattern
+- All WebSocket messages are JSON text; audio/video blobs are base64-encoded in LiveRequest format
+- Frontend hooks: `useWebSocket`, `useMediaCapture`, `useAudioPlayback`
+- AudioWorklet processors for mic capture (16kHz PCM16) and playback (24kHz PCM16)
+- Camera captures at 1 FPS as JPEG, sent as base64 in LiveRequest blob
+- Vite dev server proxies `/run_live` (WebSocket) and `/api` to backend:8000
+- Text input fallback for typing moves/messages when mic isn't available
+- Game state polled every 3s from `/api/game-state` REST endpoint
+- Session created via POST `/api/session/{userId}/{sessionId}` before WebSocket connect
+- Auto-reconnect on WebSocket close (up to 5 attempts, 2s delay)
 
 ## Phase 5: Personality & Polish (Days 9–11 | March 9–11)
 
