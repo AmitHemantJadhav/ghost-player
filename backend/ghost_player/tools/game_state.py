@@ -10,8 +10,30 @@ For production, swap to Firestore-backed session storage.
 
 import threading
 import time
+from collections.abc import Callable
+from typing import Any
 
 import chess
+
+# ---------------------------------------------------------------------------
+# Broadcast callback — server.py registers this to push state via WebSocket
+# ---------------------------------------------------------------------------
+_broadcast_callback: Callable[[dict], Any] | None = None
+
+
+def register_broadcast(cb: Callable[[dict], Any]) -> None:
+    """Register a callback that receives game-state snapshots on every change."""
+    global _broadcast_callback
+    _broadcast_callback = cb
+
+
+def _notify() -> None:
+    """Fire the broadcast callback with the current snapshot (best-effort)."""
+    if _broadcast_callback:
+        try:
+            _broadcast_callback(_state.snapshot())
+        except Exception:
+            pass
 
 
 class GameState:
@@ -75,13 +97,22 @@ class GameState:
 
     def snapshot(self) -> dict:
         """Return a JSON-serializable snapshot of the current state."""
-        return {
+        board = chess.Board(self.current_fen)
+        result = {
             "current_fen": self.current_fen,
             "move_history": list(self.move_history),
             "difficulty": self.difficulty,
             "started": self.started,
             "total_moves": len(self.move_history),
+            "is_game_over": board.is_game_over(),
+            "is_checkmate": board.is_checkmate(),
+            "is_stalemate": board.is_stalemate(),
+            "is_check": board.is_check(),
+            "winner": None,
         }
+        if board.is_checkmate():
+            result["winner"] = "black" if board.turn == chess.WHITE else "white"
+        return result
 
 
 # Module-level singleton
@@ -98,6 +129,7 @@ def reset_game() -> dict:
         Confirmation with the starting FEN.
     """
     _state.reset()
+    _notify()
     return {
         "status": "reset",
         "fen": _state.current_fen,
@@ -110,7 +142,10 @@ def record_move(fen_before: str, move_uci: str) -> dict:
 
     Not an ADK tool — called internally by other tools.
     """
-    return _state.record_move(fen_before, move_uci)
+    result = _state.record_move(fen_before, move_uci)
+    if "error" not in result:
+        _notify()
+    return result
 
 
 def get_state() -> dict:

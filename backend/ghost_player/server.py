@@ -10,6 +10,7 @@ Run with:
 """
 
 import asyncio
+import json
 import logging
 import traceback
 from pathlib import Path
@@ -30,6 +31,7 @@ from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
 from .agent import root_agent
+from .tools import game_state
 from .tools.game_state import get_state, store_frame
 
 _RUN_CONFIG = RunConfig(
@@ -58,6 +60,28 @@ runner = Runner(
     agent=root_agent,
     session_service=session_service,
 )
+
+# ---------------------------------------------------------------------------
+# WebSocket broadcast — push game state changes to all connected clients
+# ---------------------------------------------------------------------------
+_connected_websockets: set[WebSocket] = set()
+
+
+def _broadcast_game_state(state: dict) -> None:
+    """Send a game-state update to every connected WebSocket (best-effort)."""
+    msg = json.dumps({"_gameStateUpdate": state})
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    for ws in list(_connected_websockets):
+        try:
+            loop.create_task(ws.send_text(msg))
+        except Exception:
+            _connected_websockets.discard(ws)
+
+
+game_state.register_broadcast(_broadcast_game_state)
 
 
 @app.get("/health")
@@ -109,6 +133,7 @@ async def run_agent_live(
     - Server sends JSON text: ADK Event objects
     """
     await websocket.accept()
+    _connected_websockets.add(websocket)
     logger.info("WebSocket connected: user=%s session=%s", user_id, session_id)
 
     # Look up the session object — run_live with session= (not user_id/session_id)
@@ -180,6 +205,7 @@ async def run_agent_live(
         logger.exception("Error during live websocket: %s", e)
         await websocket.close(code=1011, reason=str(e)[:123])
     finally:
+        _connected_websockets.discard(websocket)
         for task in pending:
             task.cancel()
         live_request_queue.close()

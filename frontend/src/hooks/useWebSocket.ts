@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback } from "react";
-import type { TranscriptEntry } from "../types/game";
+import type { TranscriptEntry, ServerGameState } from "../types/game";
 
 /**
  * Encode an ArrayBuffer to a base64 string.
@@ -16,6 +16,8 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 interface UseWebSocketOptions {
   onAudioChunk?: (base64Pcm: string) => void;
   onTranscript?: (entry: TranscriptEntry) => void;
+  onInterrupted?: () => void;
+  onGameStateUpdate?: (state: ServerGameState) => void;
 }
 
 interface UseWebSocketReturn {
@@ -148,6 +150,26 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
           });
           agentTranscriptIdRef.current = null;
         }
+      }
+
+      // Barge-in: agent was interrupted by user speech
+      if (data.interrupted === true) {
+        if (agentTranscriptIdRef.current) {
+          optionsRef.current.onTranscript?.({
+            id: agentTranscriptIdRef.current,
+            sender: "ghost_player",
+            content: "",
+            timestamp: Date.now(),
+            finished: true,
+          });
+          agentTranscriptIdRef.current = null;
+        }
+        optionsRef.current.onInterrupted?.();
+      }
+
+      // Server-pushed game state
+      if (data._gameStateUpdate) {
+        optionsRef.current.onGameStateUpdate?.(data._gameStateUpdate);
       }
     } catch {
       // Non-JSON or unparseable — ignore

@@ -20,6 +20,19 @@ function pairMoves(
   return pairs;
 }
 
+/** Derive last move's from/to squares from the last UCI move. */
+function deriveLastMove(
+  history: ServerGameState["move_history"]
+): { from: string; to: string } | undefined {
+  if (history.length === 0) return undefined;
+  const last = history[history.length - 1];
+  const uci = last.move_uci;
+  if (uci.length >= 4) {
+    return { from: uci.slice(0, 2), to: uci.slice(2, 4) };
+  }
+  return undefined;
+}
+
 function App() {
   const [micOn, setMicOn] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
@@ -27,12 +40,11 @@ function App() {
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [userId] = useState(() => crypto.randomUUID());
   const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
-  const [textInput, setTextInput] = useState("");
 
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   // --- Audio playback ---
-  const { playChunk, stop: stopPlayback } = useAudioPlayback();
+  const { playChunk, stop: stopPlayback, isPlaying } = useAudioPlayback();
 
   // --- Transcript handler ---
   const handleTranscript = useCallback((entry: TranscriptEntry) => {
@@ -55,6 +67,8 @@ function App() {
   const ws = useWebSocket({
     onAudioChunk: playChunk,
     onTranscript: handleTranscript,
+    onInterrupted: stopPlayback,
+    onGameStateUpdate: setGameState,
   });
 
   // --- Media capture ---
@@ -68,31 +82,22 @@ function App() {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [transcript]);
 
-  // --- Poll game state ---
+  // --- One-time fetch game state on connect (fallback) ---
   useEffect(() => {
     if (!ws.isConnected) return;
-
-    const poll = async () => {
+    (async () => {
       try {
         const res = await fetch("/api/game-state");
-        if (res.ok) {
-          const state: ServerGameState = await res.json();
-          setGameState(state);
-        }
+        if (res.ok) setGameState(await res.json());
       } catch {
-        // Ignore — server may not be ready
+        // Server may not be ready
       }
-    };
-
-    poll();
-    const interval = setInterval(poll, 3000);
-    return () => clearInterval(interval);
+    })();
   }, [ws.isConnected]);
 
   // --- Connect + start session ---
   const ensureConnected = useCallback(async () => {
     if (ws.isConnected) return;
-
     try {
       await fetch(`/api/session/${userId}/${sessionId}`, { method: "POST" });
     } catch {
@@ -125,21 +130,6 @@ function App() {
     }
   }, [cameraOn, media, ensureConnected]);
 
-  // --- Send text message ---
-  const handleSendText = useCallback(async () => {
-    if (!textInput.trim()) return;
-    await ensureConnected();
-    ws.sendText(textInput.trim());
-    handleTranscript({
-      id: crypto.randomUUID(),
-      sender: "player",
-      content: textInput.trim(),
-      timestamp: Date.now(),
-      finished: true,
-    });
-    setTextInput("");
-  }, [textInput, ws, ensureConnected, handleTranscript]);
-
   // --- New session ---
   const handleNewSession = useCallback(() => {
     ws.disconnect();
@@ -153,45 +143,51 @@ function App() {
     setSessionId(crypto.randomUUID());
   }, [ws, stopPlayback, media]);
 
-  // Derive turn from FEN
+  // --- Play Again ---
+  const handlePlayAgain = useCallback(async () => {
+    // Reset on backend will be triggered by agent on new game;
+    // for now just start a fresh session
+    handleNewSession();
+  }, [handleNewSession]);
+
+  // Derived state
   const currentTurn = gameState?.current_fen
     ? gameState.current_fen.split(" ")[1] === "w" ? "White" : "Black"
     : null;
-
   const pairedMoves = gameState ? pairMoves(gameState.move_history) : [];
+  const lastMove = gameState ? deriveLastMove(gameState.move_history) : undefined;
+
+  // Recent transcript entries (last 4)
+  const recentTranscript = transcript.slice(-4);
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
       {/* Header */}
-      <header className="border-b border-gray-800 px-6 py-4">
+      <header className="border-b border-gray-800 px-6 py-3">
         <div className="mx-auto flex max-w-6xl items-center justify-between">
           <div className="flex items-center gap-3">
-            <GhostIcon className="h-8 w-8 text-emerald-400" />
+            <div className={isPlaying ? "animate-[ghost-pulse_1.5s_ease-in-out_infinite]" : ""}>
+              <GhostIcon className="h-8 w-8 text-emerald-400" />
+            </div>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight text-white">
+              <h1 className="text-xl font-bold tracking-tight text-white">
                 Ghost <span className="text-emerald-400">Player</span>
               </h1>
-              <p className="text-sm text-gray-400 flex items-center gap-2">
-                AI Chess Opponent
+              <div className="flex items-center gap-3 text-xs text-gray-500">
                 {ws.isConnected && (
-                  <span className="flex items-center gap-1 text-emerald-400 text-xs">
+                  <span className="flex items-center gap-1 text-emerald-400">
                     <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
                     Connected
                   </span>
                 )}
-                {micOn && (
-                  <span className="flex items-center gap-1 text-amber-400 text-xs">
-                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-                    Listening
-                  </span>
-                )}
-              </p>
+                {micOn && <WaveformIndicator />}
+              </div>
             </div>
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-2">
             <button
               onClick={toggleMic}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                 micOn
                   ? "bg-emerald-600 text-white hover:bg-emerald-700"
                   : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
@@ -202,7 +198,7 @@ function App() {
             </button>
             <button
               onClick={toggleCamera}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                 cameraOn
                   ? "bg-emerald-600 text-white hover:bg-emerald-700"
                   : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
@@ -213,181 +209,186 @@ function App() {
             </button>
             <button
               onClick={handleNewSession}
-              className="rounded-lg bg-gray-800 px-4 py-2 text-sm font-medium text-gray-400 hover:bg-gray-700 hover:text-gray-200 transition-colors"
+              className="rounded-lg bg-gray-800 px-3 py-2 text-sm font-medium text-gray-400 hover:bg-gray-700 hover:text-gray-200 transition-colors"
               title="Start new session"
             >
-              New Session
+              New
             </button>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
+      {/* Main Content — board-centric two-column layout */}
       <main className="mx-auto max-w-6xl p-6">
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          {/* Camera Feed */}
-          <div className="lg:col-span-2">
-            <div className="flex h-[420px] flex-col items-center justify-center rounded-xl border border-gray-800 bg-gray-900 overflow-hidden relative">
-              <video
-                ref={media.videoRef}
-                autoPlay
-                playsInline
-                muted
-                className={`h-full w-full object-cover ${cameraOn ? "" : "hidden"}`}
-              />
-              {!cameraOn && (
-                <>
-                  <CameraIcon className="h-12 w-12 text-gray-600" />
-                  <p className="mt-3 text-sm text-gray-500">Camera Feed</p>
-                  <p className="mt-1 text-xs text-gray-600">
-                    Point your camera at the board to begin
-                  </p>
-                </>
-              )}
-              {media.error && (
-                <div className="absolute bottom-3 left-3 right-3 rounded-lg bg-red-900/80 px-3 py-2 text-xs text-red-200">
-                  {media.error}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Game State Panel */}
-          <div>
-            <div className="flex h-[420px] flex-col rounded-xl border border-gray-800 bg-gray-900">
-              {gameState?.started ? (
-                <div className="flex flex-col h-full">
-                  {/* Board display */}
-                  <div className="flex justify-center pt-3 pb-2">
-                    <ChessBoard fen={gameState.current_fen} />
-                  </div>
-
-                  {/* Info bar */}
-                  <div className="px-4 py-2 border-t border-gray-800 flex items-center justify-between text-xs">
-                    <span className="text-gray-400">
-                      {currentTurn} to move
-                    </span>
-                    <span className={`rounded-full px-2 py-0.5 font-medium ${
-                      gameState.difficulty === "easy" ? "bg-green-900 text-green-300" :
-                      gameState.difficulty === "hard" ? "bg-red-900 text-red-300" :
-                      "bg-yellow-900 text-yellow-300"
-                    }`}>
-                      {gameState.difficulty}
-                    </span>
-                    <span className="text-gray-400">
-                      {gameState.total_moves} moves
-                    </span>
-                  </div>
-
-                  {/* Paired move history */}
-                  <div className="flex-1 overflow-y-auto px-4 py-2 border-t border-gray-800">
-                    {pairedMoves.length === 0 ? (
-                      <p className="text-xs text-gray-600">No moves yet</p>
-                    ) : (
-                      <div className="space-y-0.5 font-mono text-xs">
-                        {pairedMoves.map((pair) => (
-                          <div key={pair.num} className="flex gap-1">
-                            <span className="w-5 text-gray-500 shrink-0 text-right">{pair.num}.</span>
-                            <span className="w-14 text-gray-300">{pair.white}</span>
-                            {pair.black && (
-                              <span className="w-14 text-emerald-400">{pair.black}</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-1 flex-col items-center justify-center">
-                  <GhostIcon className="h-12 w-12 text-gray-700" />
-                  <p className="mt-3 text-sm text-gray-500">No game in progress</p>
-                  <p className="mt-1 text-xs text-gray-600">
-                    Say "let's play" to start a game
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Chat / Transcript Log */}
-        <div className="mt-6">
-          <div className="flex h-72 flex-col rounded-xl border border-gray-800 bg-gray-900">
-            <div className="border-b border-gray-800 px-4 py-3">
-              <h2 className="text-sm font-medium text-gray-400">
-                Transcript
-              </h2>
-            </div>
-            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-              {transcript.length === 0 ? (
-                <div className="flex h-full items-center justify-center">
-                  <p className="text-sm text-gray-600">
-                    Start a conversation with Ghost Player...
-                  </p>
-                </div>
-              ) : (
-                transcript.map((entry) => (
-                  <div
-                    key={entry.id}
-                    className={`flex ${
-                      entry.sender === "player" ? "justify-start" :
-                      entry.sender === "system" ? "justify-center" :
-                      "justify-end"
-                    }`}
-                  >
-                    <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
-                      entry.sender === "player"
-                        ? "bg-gray-800 text-gray-200"
-                        : entry.sender === "system"
-                        ? "bg-gray-800/50 text-gray-500 text-xs"
-                        : "bg-emerald-900/50 text-emerald-100"
-                    }`}>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium text-gray-500">
-                          {entry.sender === "player" ? "You" :
-                           entry.sender === "ghost_player" ? "Ghost Player" : "System"}
-                        </span>
-                      </div>
-                      <p className="mt-0.5">
-                        {entry.content}
-                        {!entry.finished && (
-                          <span className="ml-1 inline-block animate-pulse text-gray-500">...</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                ))
-              )}
-              <div ref={transcriptEndRef} />
-            </div>
-
-            {/* Text input */}
-            <div className="border-t border-gray-800 px-4 py-3">
-              <form
-                onSubmit={(e) => { e.preventDefault(); handleSendText(); }}
-                className="flex gap-2"
-              >
-                <input
-                  type="text"
-                  value={textInput}
-                  onChange={(e) => setTextInput(e.target.value)}
-                  placeholder="Type a move or message..."
-                  className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-emerald-600 focus:outline-none"
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
+          {/* Left: Board + Camera PIP */}
+          <div className="relative flex items-start justify-center rounded-xl border border-gray-800 bg-gray-900 p-6 min-h-[480px]">
+            {gameState?.started ? (
+              <>
+                <ChessBoard
+                  fen={gameState.current_fen}
+                  lastMove={lastMove}
+                  isCheck={gameState.is_check}
                 />
-                <button
-                  type="submit"
-                  disabled={!textInput.trim()}
-                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  Send
-                </button>
-              </form>
+
+                {/* Game-end overlay */}
+                {gameState.is_game_over && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-950/80 rounded-xl backdrop-blur-sm z-10">
+                    <GhostIcon className="h-16 w-16 text-emerald-400 mb-4" />
+                    <h2 className="text-2xl font-bold text-white mb-2">
+                      {gameState.is_checkmate
+                        ? `Checkmate — ${gameState.winner === "white" ? "White" : "Black"} wins!`
+                        : gameState.is_stalemate
+                        ? "Stalemate — Draw!"
+                        : "Game Over — Draw"}
+                    </h2>
+                    <button
+                      onClick={handlePlayAgain}
+                      className="mt-4 rounded-lg bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 transition-colors"
+                    >
+                      Play Again
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full">
+                <GhostIcon className="h-16 w-16 text-gray-700" />
+                <p className="mt-4 text-gray-500">No game in progress</p>
+                <p className="mt-1 text-xs text-gray-600">
+                  Turn on your mic and say "let's play"
+                </p>
+              </div>
+            )}
+
+            {/* Camera PIP overlay */}
+            {cameraOn && (
+              <div className="absolute bottom-3 right-3 z-20 overflow-hidden rounded-lg border border-emerald-900/40 shadow-lg">
+                <video
+                  ref={media.videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="h-[90px] w-[120px] object-cover"
+                />
+              </div>
+            )}
+
+            {media.error && (
+              <div className="absolute bottom-3 left-3 right-36 rounded-lg bg-red-900/80 px-3 py-2 text-xs text-red-200 z-20">
+                {media.error}
+              </div>
+            )}
+          </div>
+
+          {/* Right: Game Info Panel */}
+          <div className="flex flex-col gap-4">
+            {/* Info bar */}
+            <div className="rounded-xl border border-gray-800 bg-gray-900 px-4 py-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-300">
+                  {currentTurn ? `${currentTurn} to move` : "Waiting..."}
+                </span>
+                {gameState && (
+                  <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                    gameState.difficulty === "easy" ? "bg-green-900/60 text-green-300" :
+                    gameState.difficulty === "hard" ? "bg-red-900/60 text-red-300" :
+                    "bg-yellow-900/60 text-yellow-300"
+                  }`}>
+                    {gameState.difficulty}
+                  </span>
+                )}
+              </div>
+              {gameState?.started && (
+                <p className="text-xs text-gray-500 mt-1">
+                  {gameState.total_moves} move{gameState.total_moves !== 1 ? "s" : ""} played
+                  {gameState.is_check && !gameState.is_game_over && (
+                    <span className="ml-2 text-red-400 font-medium">Check!</span>
+                  )}
+                </p>
+              )}
+            </div>
+
+            {/* Move history */}
+            <div className="flex-1 rounded-xl border border-gray-800 bg-gray-900 flex flex-col min-h-[200px] max-h-[300px]">
+              <div className="border-b border-gray-800 px-4 py-2">
+                <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">Moves</h2>
+              </div>
+              <div className="flex-1 overflow-y-auto px-4 py-2">
+                {pairedMoves.length === 0 ? (
+                  <p className="text-xs text-gray-600 mt-2">No moves yet</p>
+                ) : (
+                  <div className="space-y-0.5 font-mono text-xs">
+                    {pairedMoves.map((pair) => (
+                      <div key={pair.num} className="flex gap-1">
+                        <span className="w-5 text-gray-500 shrink-0 text-right">{pair.num}.</span>
+                        <span className="w-14 text-gray-300">{pair.white}</span>
+                        {pair.black && (
+                          <span className="w-14 text-emerald-400">{pair.black}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Compact transcript — last few messages */}
+            <div className="rounded-xl border border-gray-800 bg-gray-900 flex flex-col max-h-[200px]">
+              <div className="border-b border-gray-800 px-4 py-2">
+                <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">Transcript</h2>
+              </div>
+              <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5">
+                {recentTranscript.length === 0 ? (
+                  <p className="text-xs text-gray-600 py-2 text-center">
+                    Start talking...
+                  </p>
+                ) : (
+                  recentTranscript.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className={`rounded-lg px-2.5 py-1.5 text-xs ${
+                        entry.sender === "player"
+                          ? "bg-gray-800 text-gray-300"
+                          : "bg-emerald-900/30 text-emerald-200"
+                      }`}
+                    >
+                      <span className="font-medium text-gray-500 mr-1.5">
+                        {entry.sender === "player" ? "You:" : "Ghost:"}
+                      </span>
+                      {entry.content}
+                      {!entry.finished && (
+                        <span className="ml-1 inline-block animate-pulse text-gray-500">...</span>
+                      )}
+                    </div>
+                  ))
+                )}
+                <div ref={transcriptEndRef} />
+              </div>
             </div>
           </div>
         </div>
       </main>
     </div>
+  );
+}
+
+/** Animated waveform bars indicating mic is active. */
+function WaveformIndicator() {
+  return (
+    <span className="flex items-center gap-[2px] h-4">
+      {[0, 1, 2, 3, 4].map((i) => (
+        <span
+          key={i}
+          className="w-[2px] rounded-full bg-amber-400"
+          style={{
+            animation: `waveform-bar 0.8s ease-in-out ${i * 0.1}s infinite`,
+            height: "4px",
+          }}
+        />
+      ))}
+      <span className="text-amber-400 ml-1">Listening</span>
+    </span>
   );
 }
 

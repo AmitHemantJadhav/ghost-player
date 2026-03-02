@@ -71,4 +71,9 @@ export interface ServerGameState {
   difficulty: "easy" | "medium" | "hard";
   started: boolean;
   total_moves: number;
+  is_game_over: boolean;
+  is_checkmate: boolean;
+  is_stalemate: boolean;
+  is_check: boolean;
+  winner: "white" | "black" | null;
 }
