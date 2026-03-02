@@ -24,11 +24,21 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from google.adk.agents.live_request_queue import LiveRequest, LiveRequestQueue
+from google.adk.agents.run_config import RunConfig
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
+from google.genai import types
 
 from .agent import root_agent
 from .tools.game_state import get_state, store_frame
+
+_RUN_CONFIG = RunConfig(
+    speech_config=types.SpeechConfig(
+        voice_config=types.VoiceConfig(
+            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Fenrir")
+        )
+    )
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,10 +126,10 @@ async def run_agent_live(
 
     async def forward_events() -> None:
         """Read events from runner.run_live() and send to WebSocket."""
-        # No RunConfig — let the runner use defaults (AUDIO modality, etc.)
         live_events = runner.run_live(
             session=session,
             live_request_queue=live_request_queue,
+            run_config=_RUN_CONFIG,
         )
         async for event in live_events:
             await websocket.send_text(

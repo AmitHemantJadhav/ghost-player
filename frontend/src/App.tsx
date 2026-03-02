@@ -3,6 +3,22 @@ import type { TranscriptEntry, ServerGameState } from "./types/game";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useMediaCapture } from "./hooks/useMediaCapture";
 import { useAudioPlayback } from "./hooks/useAudioPlayback";
+import ChessBoard from "./components/ChessBoard";
+
+/** Group move history into paired rows: [white, black?] */
+function pairMoves(
+  moves: ServerGameState["move_history"]
+): Array<{ num: number; white: string; black?: string }> {
+  const pairs: Array<{ num: number; white: string; black?: string }> = [];
+  for (const m of moves) {
+    if (m.side === "white") {
+      pairs.push({ num: m.move_number, white: m.move_san });
+    } else if (pairs.length > 0) {
+      pairs[pairs.length - 1].black = m.move_san;
+    }
+  }
+  return pairs;
+}
 
 function App() {
   const [micOn, setMicOn] = useState(false);
@@ -24,9 +40,7 @@ function App() {
       const idx = prev.findIndex((e) => e.id === entry.id);
       if (idx >= 0) {
         const updated = [...prev];
-        // Append or finalize content
         if (entry.finished && entry.content === "") {
-          // Finalize existing entry
           updated[idx] = { ...updated[idx], finished: true };
         } else {
           updated[idx] = { ...updated[idx], content: entry.content, finished: entry.finished };
@@ -79,7 +93,6 @@ function App() {
   const ensureConnected = useCallback(async () => {
     if (ws.isConnected) return;
 
-    // Create session via REST first
     try {
       await fetch(`/api/session/${userId}/${sessionId}`, { method: "POST" });
     } catch {
@@ -145,21 +158,35 @@ function App() {
     ? gameState.current_fen.split(" ")[1] === "w" ? "White" : "Black"
     : null;
 
+  const pairedMoves = gameState ? pairMoves(gameState.move_history) : [];
+
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
       {/* Header */}
       <header className="border-b border-gray-800 px-6 py-4">
         <div className="mx-auto flex max-w-6xl items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">
-              Ghost Player
-            </h1>
-            <p className="text-sm text-gray-400">
-              AI Board Game Opponent
-              {ws.isConnected && (
-                <span className="ml-2 inline-block h-2 w-2 rounded-full bg-emerald-500" title="Connected" />
-              )}
-            </p>
+          <div className="flex items-center gap-3">
+            <GhostIcon className="h-8 w-8 text-emerald-400" />
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-white">
+                Ghost <span className="text-emerald-400">Player</span>
+              </h1>
+              <p className="text-sm text-gray-400 flex items-center gap-2">
+                AI Chess Opponent
+                {ws.isConnected && (
+                  <span className="flex items-center gap-1 text-emerald-400 text-xs">
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                    Connected
+                  </span>
+                )}
+                {micOn && (
+                  <span className="flex items-center gap-1 text-amber-400 text-xs">
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    Listening
+                  </span>
+                )}
+              </p>
+            </div>
           </div>
           <div className="flex gap-3">
             <button
@@ -200,8 +227,7 @@ function App() {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           {/* Camera Feed */}
           <div className="lg:col-span-2">
-            <div className="flex h-96 flex-col items-center justify-center rounded-xl border border-gray-800 bg-gray-900 overflow-hidden relative">
-              {/* Always render video so ref stays attached; hide when camera off */}
+            <div className="flex h-[420px] flex-col items-center justify-center rounded-xl border border-gray-800 bg-gray-900 overflow-hidden relative">
               <video
                 ref={media.videoRef}
                 autoPlay
@@ -226,52 +252,46 @@ function App() {
             </div>
           </div>
 
-          {/* Game State */}
+          {/* Game State Panel */}
           <div>
-            <div className="flex h-96 flex-col rounded-xl border border-gray-800 bg-gray-900">
+            <div className="flex h-[420px] flex-col rounded-xl border border-gray-800 bg-gray-900">
               {gameState?.started ? (
                 <div className="flex flex-col h-full">
-                  {/* Header */}
-                  <div className="border-b border-gray-800 px-4 py-3 flex items-center justify-between">
-                    <h2 className="text-sm font-medium text-gray-400">Game State</h2>
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                  {/* Board display */}
+                  <div className="flex justify-center pt-3 pb-2">
+                    <ChessBoard fen={gameState.current_fen} />
+                  </div>
+
+                  {/* Info bar */}
+                  <div className="px-4 py-2 border-t border-gray-800 flex items-center justify-between text-xs">
+                    <span className="text-gray-400">
+                      {currentTurn} to move
+                    </span>
+                    <span className={`rounded-full px-2 py-0.5 font-medium ${
                       gameState.difficulty === "easy" ? "bg-green-900 text-green-300" :
                       gameState.difficulty === "hard" ? "bg-red-900 text-red-300" :
                       "bg-yellow-900 text-yellow-300"
                     }`}>
                       {gameState.difficulty}
                     </span>
+                    <span className="text-gray-400">
+                      {gameState.total_moves} moves
+                    </span>
                   </div>
 
-                  {/* Turn indicator */}
-                  <div className="px-4 py-3 border-b border-gray-800">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-gray-400">Turn</span>
-                      <span className="font-medium text-white">{currentTurn} to move</span>
-                    </div>
-                    <div className="flex items-center justify-between text-sm mt-1">
-                      <span className="text-gray-400">Moves</span>
-                      <span className="font-medium text-white">{gameState.total_moves}</span>
-                    </div>
-                  </div>
-
-                  {/* Move history */}
-                  <div className="flex-1 overflow-y-auto px-4 py-2">
-                    <h3 className="text-xs font-medium text-gray-500 mb-2">Move History</h3>
-                    {gameState.move_history.length === 0 ? (
+                  {/* Paired move history */}
+                  <div className="flex-1 overflow-y-auto px-4 py-2 border-t border-gray-800">
+                    {pairedMoves.length === 0 ? (
                       <p className="text-xs text-gray-600">No moves yet</p>
                     ) : (
-                      <div className="space-y-0.5">
-                        {gameState.move_history.map((m, i) => (
-                          <div key={i} className="flex text-xs">
-                            {m.side === "white" && (
-                              <span className="w-6 text-gray-500 shrink-0">{m.move_number}.</span>
+                      <div className="space-y-0.5 font-mono text-xs">
+                        {pairedMoves.map((pair) => (
+                          <div key={pair.num} className="flex gap-1">
+                            <span className="w-5 text-gray-500 shrink-0 text-right">{pair.num}.</span>
+                            <span className="w-14 text-gray-300">{pair.white}</span>
+                            {pair.black && (
+                              <span className="w-14 text-emerald-400">{pair.black}</span>
                             )}
-                            <span className={`${
-                              m.side === "white" ? "text-gray-300" : "text-emerald-400 ml-6"
-                            }`}>
-                              {m.move_san}
-                            </span>
                           </div>
                         ))}
                       </div>
@@ -280,10 +300,10 @@ function App() {
                 </div>
               ) : (
                 <div className="flex flex-1 flex-col items-center justify-center">
-                  <BoardIcon className="h-12 w-12 text-gray-600" />
-                  <p className="mt-3 text-sm text-gray-500">Game State</p>
+                  <GhostIcon className="h-12 w-12 text-gray-700" />
+                  <p className="mt-3 text-sm text-gray-500">No game in progress</p>
                   <p className="mt-1 text-xs text-gray-600">
-                    No game in progress
+                    Say "let's play" to start a game
                   </p>
                 </div>
               )}
@@ -293,7 +313,7 @@ function App() {
 
         {/* Chat / Transcript Log */}
         <div className="mt-6">
-          <div className="flex h-64 flex-col rounded-xl border border-gray-800 bg-gray-900">
+          <div className="flex h-72 flex-col rounded-xl border border-gray-800 bg-gray-900">
             <div className="border-b border-gray-800 px-4 py-3">
               <h2 className="text-sm font-medium text-gray-400">
                 Transcript
@@ -371,6 +391,19 @@ function App() {
   );
 }
 
+function GhostIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      className={className}
+    >
+      <path d="M12 2C7.58 2 4 5.58 4 10v10.5c0 .83.67 1.5 1.5 1.5s1.06-.26 1.33-.63c.42-.58 1.26-.58 1.68 0 .42.58 1.26.58 1.68 0 .42-.58 1.26-.58 1.68 0 .42.58 1.26.58 1.68 0 .42-.58 1.26-.58 1.68 0 .27.37.77.63 1.33.63.83 0 1.5-.67 1.5-1.5V10c0-4.42-3.58-8-8-8ZM9.5 13a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z" />
+    </svg>
+  );
+}
+
 function MicIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg
@@ -404,25 +437,6 @@ function CameraIcon({ className = "h-4 w-4" }: { className?: string }) {
     >
       <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
       <circle cx="12" cy="13" r="3" />
-    </svg>
-  );
-}
-
-function BoardIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <rect width="18" height="18" x="3" y="3" rx="2" />
-      <path d="M3 12h18" />
-      <path d="M12 3v18" />
     </svg>
   );
 }

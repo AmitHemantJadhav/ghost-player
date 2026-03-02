@@ -85,15 +85,22 @@
 - Session created via POST `/api/session/{userId}/{sessionId}` before WebSocket connect
 - Auto-reconnect on WebSocket close (up to 5 attempts, 2s delay)
 
-## Phase 5: Personality & Polish (Days 9–11 | March 9–11)
+## Phase 5: Personality & Polish (Days 9–11 | March 9–11) ✅ DONE
 
-- [ ] Tune agent personality — competitive but friendly chess opponent
-- [ ] Add trash talk and commentary to agent responses
-- [ ] Choose a distinct voice (from Puck, Charon, Kore, Fenrir, Aoede, Leda, Orus, Zephyr)
-- [ ] Add graceful error handling ("I can't see the board clearly, could you adjust the camera?")
-- [ ] Add rules grounding via Google Search tool (settle disputes)
-- [ ] Add a second simple game (Connect Four) for demo variety
-- [ ] Polish frontend UI — clean layout, responsive design
+- [x] Tune agent personality — spectral chess master persona with situation-specific commentary
+- [x] Add trash talk and commentary to agent responses
+- [x] Choose a distinct voice — Fenrir (bold, confident, competitive)
+- [x] Add graceful error handling ("I can't see the board clearly, could you adjust the camera?")
+- [x] Add rules grounding via `lookup_chess_rules` tool (Gemini + Google Search)
+- [x] ~~Add a second simple game (Connect Four)~~ — SKIPPED (chess alone is strong demo)
+- [x] Polish frontend UI — ghost branding, visual chessboard, paired move history, status indicators
+
+### Phase 5 Notes
+- Voice: Fenrir via RunConfig SpeechConfig (only speech_config — no response_modalities/streaming_mode)
+- Rules tool: `backend/ghost_player/tools/rules.py` — uses `gemini-2.5-flash` with Google Search grounding
+- Personality: Spectral chess master, dry wit, centuries of experience, situation-specific one-liners
+- Frontend: Ghost icon in header, emerald accent, ChessBoard component (FEN → Unicode pieces), paired move notation
+- ChessBoard: `frontend/src/components/ChessBoard.tsx` — pure CSS grid, amber squares, no interaction
 
 ## Phase 6: Deployment & Submission (Days 11–14 | March 11–14)
 

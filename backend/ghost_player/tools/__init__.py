@@ -12,6 +12,7 @@ from .chess_engine import (
     validate_move,
 )
 from .game_state import reset_game, set_difficulty
+from .rules import lookup_chess_rules
 from .vision import analyze_board
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "set_difficulty",
     "reset_game",
     "analyze_board",
+    "lookup_chess_rules",
 ]
