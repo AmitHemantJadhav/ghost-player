@@ -11,22 +11,23 @@ Read `docs/TODO.md` for the prioritised build plan and remaining tasks.
 
 ## Current Status (March 3, 2026)
 
-Phases 1–7c complete. Working features:
+**Phase 7 fully complete.** Working features:
 - Real-time voice conversation via Gemini Live API (Fenrir voice)
 - Camera board detection via separate Gemini 2.5 Flash vision calls
 - Chess engine with minimax alpha-beta (easy/medium/hard)
 - Verbal move fallback (player speaks move when camera can't detect)
 - Real-time game state broadcast to frontend via WebSocket
 - Barge-in / interruption support
-- Opening recognition (~65 openings, ECO codes)
-- Coach mode (agent explains every move when toggled on)
-- Visual evaluation bar (material balance, updates after every move)
+- Visual evaluation bar (material balance, centipawns, smooth animation)
+- Opening recognition (~65 openings, ECO codes, `recognize_opening` tool)
+- Coach mode (`toggle_coach_mode`, cyan badge in UI, agent explains every move)
+- Post-game analysis (`analyze_game` tool: turning point, blunder detection, phase counts, key insight shown in game-over overlay)
 - Google Search grounded rules lookup
-- React UI: chess board, evaluation bar, move history, transcript, coach badge
+- React UI: chess board, eval bar, move history, transcript, coach badge, post-game insight
 
-**Remaining**: Post-game analysis (7d), multi-agent ADK refactor (8a), Firestore (8b),
-frame preprocessing (8c), captured pieces + move animation (9a/9b), demo mode (9c),
-Terraform (10a), Cloud Run deploy (10b), architecture diagram (10c), demo video (11a).
+**Remaining**: multi-agent ADK refactor (8a), Firestore (8b), frame preprocessing (8c),
+captured pieces + move animation (9a/9b), demo mode (9c), Terraform (10a),
+Cloud Run deploy (10b), architecture diagram (10c), demo video + submission (11).
 
 ---
 
@@ -68,8 +69,9 @@ Browser
                  get_move_history
                  set_difficulty
                  reset_game
-                 recognize_opening (prefix-match against ~65 openings)
-                 toggle_coach_mode (flips coach_mode in GameState)
+                 recognize_opening  (prefix-match against ~65 openings)
+                 toggle_coach_mode  (flips coach_mode in GameState)
+                 analyze_game       (turning point, blunder detection, post-game insight)
                  lookup_chess_rules (Gemini 2.5 Flash + Google Search)
                  stop_streaming
 ```
@@ -87,7 +89,7 @@ makes separate `gemini-2.5-flash` calls for vision analysis.
 |------|---------|
 | `backend/ghost_player/agent.py` | `root_agent` definition, system prompt, tools list |
 | `backend/ghost_player/server.py` | FastAPI + WebSocket bridge to ADK `run_live()` |
-| `backend/ghost_player/tools/game_state.py` | `GameState` singleton: FEN, history, difficulty, eval score, coach mode, frame buffer |
+| `backend/ghost_player/tools/game_state.py` | `GameState` singleton: FEN, history, difficulty, eval score, coach mode, post-game insight, frame buffer |
 | `backend/ghost_player/tools/chess_engine.py` | python-chess tools: `suggest_move` (minimax), `apply_move`, `get_game_status`, etc. |
 | `backend/ghost_player/tools/vision.py` | Streaming async generator: polls frame buffer, calls Gemini vision, detects moves |
 | `backend/ghost_player/tools/openings.py` | Opening book (~65 entries) + `recognize_opening()` tool |
@@ -155,6 +157,8 @@ cd backend && python -m pytest tests/
 - `_notify()` in `game_state.py` triggers WebSocket broadcast to all connected clients
 - `evaluation_score` is computed in `GameState.record_move()` for every move — covers all code paths (vision, verbal, AI)
 - `coach_mode` persists in `GameState` and is included in `get_game_status()` result so the agent can rediscover it after long context
+- `analyze_game()` recomputes eval at every `fen_after` in history using `_compute_white_advantage` — blunder threshold is 300cp (3 pawns)
+- `post_game_insight` is stored in `GameState` and broadcast via `_notify()` so the overlay updates the moment the agent calls `analyze_game`
 
 ---
 

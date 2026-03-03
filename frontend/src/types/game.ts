@@ -80,4 +80,6 @@ export interface ServerGameState {
   evaluation_score: number;
   /** Whether the agent is in teaching/coaching mode. */
   coach_mode: boolean;
+  /** One-line post-game insight shown in the game-over overlay. */
+  post_game_insight: string;
 }

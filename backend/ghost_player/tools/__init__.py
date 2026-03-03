@@ -11,7 +11,7 @@ from .chess_engine import (
     suggest_move,
     validate_move,
 )
-from .game_state import reset_game, set_difficulty, toggle_coach_mode
+from .game_state import analyze_game, reset_game, set_difficulty, toggle_coach_mode
 from .openings import recognize_opening
 from .rules import lookup_chess_rules
 from .vision import analyze_board
@@ -29,4 +29,5 @@ __all__ = [
     "lookup_chess_rules",
     "recognize_opening",
     "toggle_coach_mode",
+    "analyze_game",
 ]

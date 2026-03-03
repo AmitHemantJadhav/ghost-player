@@ -9,6 +9,7 @@ from google.adk.tools import FunctionTool
 
 from .tools import (
     analyze_board,
+    analyze_game,
     apply_move,
     get_game_status,
     get_legal_moves,
@@ -100,6 +101,23 @@ similar — call `toggle_coach_mode()` and confirm: "Back to normal play."
 If you're unsure whether coach mode is on, call `get_game_status` — it includes
 the current coach_mode flag.
 
+## Post-Game Analysis
+
+When the game ends — checkmate, stalemate, or any draw — call `analyze_game()`
+once, then deliver a verbal review in 2-3 sentences. Use the tool result to
+make it specific, never generic.
+
+- **You won (checkmate by Black)**: Accept victory with quiet dignity. Reference
+  one concrete detail — the turning point move or a blunder if there was one.
+  Example: "A good fight — but that knight sacrifice on move 14 sealed it."
+- **Player won (checkmate by White)**: Genuine congratulations. Call out what
+  they did well. Example: "Well played. You kept the pressure on and I never
+  recovered after move 18."
+- **Stalemate or draw**: Acknowledge the balance. Example: "Forty-two moves
+  and neither of us could finish it. I respect that."
+
+Always call `stop_streaming('analyze_board')` before or after the review.
+
 ## Opening Recognition
 
 After the 3rd or 4th move of the game, call `recognize_opening` exactly once.
@@ -139,6 +157,7 @@ root_agent = Agent(
         lookup_chess_rules,
         recognize_opening,
         toggle_coach_mode,
+        analyze_game,
         stop_streaming_tool,
     ],
 )

@@ -74,6 +74,7 @@ class GameState:
         self.started: bool = False
         self.evaluation_score: int = 0  # centipawns, positive = White ahead
         self.coach_mode: bool = False
+        self.post_game_insight: str = ""  # one-line summary shown in game-over overlay
 
     def reset(self) -> None:
         """Clear all state for a new game."""
@@ -83,6 +84,7 @@ class GameState:
         self.started = False
         self.evaluation_score = 0
         self.coach_mode = False
+        self.post_game_insight = ""
 
     def record_move(self, fen_before: str, move_uci: str) -> dict:
         """Validate, apply, and record a move.
@@ -144,6 +146,7 @@ class GameState:
             "winner": None,
             "evaluation_score": self.evaluation_score,
             "coach_mode": self.coach_mode,
+            "post_game_insight": self.post_game_insight,
         }
         if board.is_checkmate():
             result["winner"] = "black" if board.turn == chess.WHITE else "white"
@@ -254,6 +257,75 @@ def toggle_coach_mode() -> dict:
 def get_coach_mode() -> bool:
     """Return whether coach mode is currently active. Internal helper."""
     return _state.coach_mode
+
+
+def analyze_game() -> dict:
+    """Analyze the completed game and return key insights for your verbal review.
+
+    Call this exactly once, immediately after the game ends (checkmate,
+    stalemate, or draw). Use the result to deliver a 2-3 sentence verbal
+    post-game summary. Do not call during an ongoing game.
+
+    Returns:
+        A dict with: total_moves, winner, turning_point_move,
+        turning_point_number, turning_point_side, biggest_swing_cp,
+        had_blunder (swing ≥ 300cp), opening_moves, middlegame_moves,
+        endgame_moves, and key_insight (one-line summary for the UI).
+    """
+    history = list(_state.move_history)
+
+    if not history:
+        return {"error": "No moves to analyze."}
+
+    total = len(history)
+
+    # Compute material balance (White-perspective centipawns) after each move.
+    evals: list[int] = [_compute_white_advantage(e["fen_after"]) for e in history]
+
+    # Find the move that caused the largest single-move evaluation swing.
+    biggest_swing = 0
+    turning_idx = 0
+    for i in range(1, len(evals)):
+        swing = abs(evals[i] - evals[i - 1])
+        if swing > biggest_swing:
+            biggest_swing = swing
+            turning_idx = i
+
+    tp = history[turning_idx]
+    had_blunder = biggest_swing >= 300  # 3-pawn swing = textbook blunder threshold
+
+    # Phase breakdown by full-move number.
+    opening = sum(1 for e in history if e["move_number"] <= 10)
+    middlegame = sum(1 for e in history if 11 <= e["move_number"] <= 30)
+    endgame = sum(1 for e in history if e["move_number"] > 30)
+
+    # Build a one-line insight for the frontend overlay.
+    if had_blunder:
+        swing_pawns = biggest_swing / 100
+        insight = (
+            f"Turning point: {tp['side'].title()} played {tp['move_san']} "
+            f"on move {tp['move_number']} "
+            f"(\u00b1{swing_pawns:.1f} pawns)"
+        )
+    else:
+        insight = f"{total} moves — a well-fought game with no decisive errors"
+
+    _state.post_game_insight = insight
+    _notify()
+
+    return {
+        "total_moves": total,
+        "winner": _state.snapshot().get("winner"),
+        "turning_point_move": tp["move_san"],
+        "turning_point_number": tp["move_number"],
+        "turning_point_side": tp["side"],
+        "biggest_swing_cp": biggest_swing,
+        "had_blunder": had_blunder,
+        "opening_moves": opening,
+        "middlegame_moves": middlegame,
+        "endgame_moves": endgame,
+        "key_insight": insight,
+    }
 
 
 def set_evaluation(score: int) -> None:

@@ -245,6 +245,11 @@ function App() {
                         ? "Stalemate — Draw!"
                         : "Game Over — Draw"}
                     </h2>
+                    {gameState.post_game_insight && (
+                      <p className="text-sm text-gray-400 mb-1 px-6 text-center">
+                        {gameState.post_game_insight}
+                      </p>
+                    )}
                     <button
                       onClick={handlePlayAgain}
                       className="mt-4 rounded-lg bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 transition-colors"
