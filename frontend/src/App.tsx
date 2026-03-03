@@ -225,11 +225,14 @@ function App() {
           <div className="relative flex items-start justify-center rounded-xl border border-gray-800 bg-gray-900 p-6 min-h-[480px]">
             {gameState?.started ? (
               <>
-                <ChessBoard
-                  fen={gameState.current_fen}
-                  lastMove={lastMove}
-                  isCheck={gameState.is_check}
-                />
+                <div className="flex flex-col items-center gap-3">
+                  <EvaluationBar score={gameState.evaluation_score ?? 0} />
+                  <ChessBoard
+                    fen={gameState.current_fen}
+                    lastMove={lastMove}
+                    isCheck={gameState.is_check}
+                  />
+                </div>
 
                 {/* Game-end overlay */}
                 {gameState.is_game_over && (
@@ -290,13 +293,20 @@ function App() {
                   {currentTurn ? `${currentTurn} to move` : "Waiting..."}
                 </span>
                 {gameState && (
-                  <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                    gameState.difficulty === "easy" ? "bg-green-900/60 text-green-300" :
-                    gameState.difficulty === "hard" ? "bg-red-900/60 text-red-300" :
-                    "bg-yellow-900/60 text-yellow-300"
-                  }`}>
-                    {gameState.difficulty}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {gameState.coach_mode && (
+                      <span className="rounded-full bg-cyan-900/60 px-2.5 py-0.5 text-xs font-medium text-cyan-300">
+                        Coach
+                      </span>
+                    )}
+                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                      gameState.difficulty === "easy" ? "bg-green-900/60 text-green-300" :
+                      gameState.difficulty === "hard" ? "bg-red-900/60 text-red-300" :
+                      "bg-yellow-900/60 text-yellow-300"
+                    }`}>
+                      {gameState.difficulty}
+                    </span>
+                  </div>
                 )}
               </div>
               {gameState?.started && (
@@ -369,6 +379,41 @@ function App() {
           </div>
         </div>
       </main>
+    </div>
+  );
+}
+
+/**
+ * Horizontal evaluation bar.
+ * score > 0 = White (human) ahead, score < 0 = Black (Ghost) ahead.
+ * Range is capped at ±1000cp (10 pawns) for display purposes.
+ */
+function EvaluationBar({ score }: { score: number }) {
+  const MAX = 1000;
+  const clamped = Math.max(-MAX, Math.min(MAX, score));
+  // 0–100% where 50 = even, >50 = White ahead
+  const whitePct = ((clamped + MAX) / (2 * MAX)) * 100;
+
+  const absScore = Math.abs(score / 100);
+  const label =
+    score === 0 ? "0.0" : score > 0 ? `+${absScore.toFixed(1)}` : `-${absScore.toFixed(1)}`;
+  const labelColor =
+    score > 50 ? "text-gray-200" : score < -50 ? "text-emerald-400" : "text-gray-500";
+
+  return (
+    <div className="flex w-full max-w-[384px] items-center gap-2">
+      <span className="w-4 text-center text-[10px] text-gray-500">W</span>
+      <div className="relative h-2.5 flex-1 overflow-hidden rounded-full bg-gray-800">
+        {/* White bar grows from the left */}
+        <div
+          className="absolute left-0 top-0 h-full rounded-l-full bg-gray-200 transition-all duration-500"
+          style={{ width: `${whitePct}%` }}
+        />
+        {/* Centre tick */}
+        <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-gray-600" />
+      </div>
+      <span className="w-4 text-center text-[10px] text-gray-500">B</span>
+      <span className={`w-10 text-right font-mono text-[11px] ${labelColor}`}>{label}</span>
     </div>
   );
 }

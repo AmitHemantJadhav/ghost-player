@@ -76,4 +76,8 @@ export interface ServerGameState {
   is_stalemate: boolean;
   is_check: boolean;
   winner: "white" | "black" | null;
+  /** Material evaluation in centipawns. Positive = White ahead, negative = Black ahead. */
+  evaluation_score: number;
+  /** Whether the agent is in teaching/coaching mode. */
+  coach_mode: boolean;
 }

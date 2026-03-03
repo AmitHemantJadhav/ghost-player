@@ -15,6 +15,34 @@ from typing import Any
 
 import chess
 
+# Material values used for the evaluation bar (centipawns, White-perspective).
+_MATERIAL_VALUES: dict[int, int] = {
+    chess.PAWN: 100,
+    chess.KNIGHT: 320,
+    chess.BISHOP: 330,
+    chess.ROOK: 500,
+    chess.QUEEN: 900,
+    chess.KING: 0,
+}
+
+
+def _compute_white_advantage(fen: str) -> int:
+    """Return material balance in centipawns from White's perspective.
+
+    Positive = White ahead, negative = Black (Ghost) ahead. Pure material
+    count — no mobility term, so the bar stays stable between moves.
+    """
+    try:
+        board = chess.Board(fen)
+    except ValueError:
+        return 0
+    score = 0
+    for pt, val in _MATERIAL_VALUES.items():
+        score += len(board.pieces(pt, chess.WHITE)) * val
+        score -= len(board.pieces(pt, chess.BLACK)) * val
+    return score
+
+
 # ---------------------------------------------------------------------------
 # Broadcast callback — server.py registers this to push state via WebSocket
 # ---------------------------------------------------------------------------
@@ -44,6 +72,8 @@ class GameState:
         self.move_history: list[dict] = []
         self.difficulty: str = "medium"
         self.started: bool = False
+        self.evaluation_score: int = 0  # centipawns, positive = White ahead
+        self.coach_mode: bool = False
 
     def reset(self) -> None:
         """Clear all state for a new game."""
@@ -51,6 +81,8 @@ class GameState:
         self.move_history.clear()
         self.difficulty = "medium"
         self.started = False
+        self.evaluation_score = 0
+        self.coach_mode = False
 
     def record_move(self, fen_before: str, move_uci: str) -> dict:
         """Validate, apply, and record a move.
@@ -92,6 +124,7 @@ class GameState:
         self.move_history.append(entry)
         self.current_fen = fen_after
         self.started = True
+        self.evaluation_score = _compute_white_advantage(fen_after)
 
         return entry
 
@@ -109,6 +142,8 @@ class GameState:
             "is_stalemate": board.is_stalemate(),
             "is_check": board.is_check(),
             "winner": None,
+            "evaluation_score": self.evaluation_score,
+            "coach_mode": self.coach_mode,
         }
         if board.is_checkmate():
             result["winner"] = "black" if board.turn == chess.WHITE else "white"
@@ -188,6 +223,47 @@ def set_difficulty(level: str) -> dict:
 def get_difficulty() -> str:
     """Return the current difficulty setting. Internal helper."""
     return _state.difficulty
+
+
+def toggle_coach_mode() -> dict:
+    """Toggle coach mode on or off.
+
+    Call this when the player asks to be coached, taught, or wants
+    explanations of moves. Call again when they want to stop.
+
+    When coach mode is ON you should:
+    - After each of the player's moves: confirm the move, briefly evaluate
+      it, and name one idea or threat that follows.
+    - After each of your own moves: explain in one sentence why you played it.
+
+    Returns:
+        The new coach_mode state and a confirmation message.
+    """
+    _state.coach_mode = not _state.coach_mode
+    _notify()
+    return {
+        "coach_mode": _state.coach_mode,
+        "message": (
+            "Coach mode activated. I'll explain every move."
+            if _state.coach_mode
+            else "Coach mode deactivated. Back to normal play."
+        ),
+    }
+
+
+def get_coach_mode() -> bool:
+    """Return whether coach mode is currently active. Internal helper."""
+    return _state.coach_mode
+
+
+def set_evaluation(score: int) -> None:
+    """Store the current material evaluation (centipawns, positive = White ahead).
+
+    Not an ADK tool — called internally by chess_engine after each move.
+    Triggers a broadcast so the frontend bar updates in real time.
+    """
+    _state.evaluation_score = score
+    _notify()
 
 
 def get_current_fen() -> str:

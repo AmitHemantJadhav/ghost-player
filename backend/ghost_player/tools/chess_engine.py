@@ -43,6 +43,7 @@ def get_game_status(fen: str) -> dict:
         "is_threefold_repetition": board.can_claim_threefold_repetition(),
         "is_game_over": board.is_game_over(),
         "fullmove_number": board.fullmove_number,
+        "coach_mode": game_state.get_coach_mode(),
     }
 
     # Human-readable summary
@@ -189,7 +190,7 @@ def suggest_move(fen: str, difficulty: str = "") -> dict:
     board.push(move)
     resulting_fen = board.fen()
 
-    # Record AI's move in shared game state
+    # Record AI's move in shared game state (also updates evaluation_score)
     game_state.record_move(fen, uci)
 
     return {
@@ -257,9 +258,8 @@ def apply_move(fen: str, move: str) -> dict:
     uci = chess_move.uci()
     side = "white" if board.turn == chess.WHITE else "black"
 
-    # Record in shared game state
+    # Record in shared game state (also updates evaluation_score)
     game_state.record_move(fen, uci)
-
     board.push(chess_move)
     resulting_fen = board.fen()
 
