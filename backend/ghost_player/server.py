@@ -12,7 +12,6 @@ Run with:
 import asyncio
 import json
 import logging
-import traceback
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -33,6 +32,7 @@ from google.genai import types
 from .agent import root_agent
 from .tools import game_state
 from .tools.game_state import get_state, store_frame
+from . import demo_games
 
 _RUN_CONFIG = RunConfig(
     speech_config=types.SpeechConfig(
@@ -84,10 +84,38 @@ def _broadcast_game_state(state: dict) -> None:
 game_state.register_broadcast(_broadcast_game_state)
 
 
+_active_demo_task: asyncio.Task | None = None
+
+
 @app.get("/health")
 async def health() -> dict:
     """Health check endpoint."""
     return {"status": "ok", "agent": "ghost_player"}
+
+
+@app.get("/api/demo/games")
+async def list_demo_games() -> dict:
+    """Return available demo games for Watch Demo feature."""
+    return {
+        "games": [
+            {"id": gid, "name": g["name"], "description": g["description"]}
+            for gid, g in demo_games.DEMO_GAMES.items()
+        ]
+    }
+
+
+@app.post("/api/demo/play/{game_id}")
+async def play_demo(game_id: str) -> dict:
+    """Start replaying a demo game (applies moves automatically every 2.5s)."""
+    global _active_demo_task
+    if game_id not in demo_games.DEMO_GAMES:
+        return {"error": f"Unknown demo: {game_id}. Choose from: {list(demo_games.DEMO_GAMES)}"}
+
+    if _active_demo_task and not _active_demo_task.done():
+        _active_demo_task.cancel()
+
+    _active_demo_task = asyncio.create_task(demo_games.replay_game(game_id))
+    return {"status": "started", "game": demo_games.DEMO_GAMES[game_id]["name"]}
 
 
 @app.get("/api/game-state")
@@ -149,6 +177,15 @@ async def run_agent_live(
 
     live_request_queue = LiveRequestQueue()
 
+    async def keepalive() -> None:
+        """Send a silent ping every 90s to prevent the Gemini Live 2-min timeout."""
+        while True:
+            await asyncio.sleep(90)
+            try:
+                live_request_queue.send(LiveRequest(text="..."))
+            except Exception:
+                break
+
     async def forward_events() -> None:
         """Read events from runner.run_live() and send to WebSocket."""
         live_events = runner.run_live(
@@ -188,10 +225,11 @@ async def run_agent_live(
                 # Audio and text go to the Live API via the queue
                 live_request_queue.send(live_request)
 
-    # Run both tasks concurrently and cancel all if one fails.
+    # Run all tasks concurrently; cancel the rest if one fails.
     tasks = [
         asyncio.create_task(forward_events()),
         asyncio.create_task(process_messages()),
+        asyncio.create_task(keepalive()),
     ]
     done, pending = await asyncio.wait(
         tasks, return_when=asyncio.FIRST_EXCEPTION

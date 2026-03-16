@@ -75,6 +75,8 @@ class GameState:
         self.evaluation_score: int = 0  # centipawns, positive = White ahead
         self.coach_mode: bool = False
         self.post_game_insight: str = ""  # one-line summary shown in game-over overlay
+        self.captured_by_white: list[str] = []  # black pieces white has captured (lowercase FEN chars)
+        self.captured_by_black: list[str] = []  # white pieces black has captured (uppercase FEN chars)
 
     def reset(self) -> None:
         """Clear all state for a new game."""
@@ -85,6 +87,8 @@ class GameState:
         self.evaluation_score = 0
         self.coach_mode = False
         self.post_game_insight = ""
+        self.captured_by_white.clear()
+        self.captured_by_black.clear()
 
     def record_move(self, fen_before: str, move_uci: str) -> dict:
         """Validate, apply, and record a move.
@@ -112,9 +116,28 @@ class GameState:
         san = board.san(move)
         side = "white" if board.turn == chess.WHITE else "black"
         move_number = board.fullmove_number
+        moving_side = board.turn  # save before push
+
+        # Detect captured piece before pushing
+        captured_char: str | None = None
+        if board.is_capture(move):
+            if board.is_en_passant(move):
+                # En passant always captures a pawn of the opposite color
+                captured_char = "p" if moving_side == chess.WHITE else "P"
+            else:
+                captured_piece = board.piece_at(move.to_square)
+                if captured_piece:
+                    captured_char = captured_piece.symbol()
 
         board.push(move)
         fen_after = board.fen()
+
+        # Record capture
+        if captured_char:
+            if moving_side == chess.WHITE:
+                self.captured_by_white.append(captured_char)
+            else:
+                self.captured_by_black.append(captured_char)
 
         entry = {
             "move_number": move_number,
@@ -147,6 +170,8 @@ class GameState:
             "evaluation_score": self.evaluation_score,
             "coach_mode": self.coach_mode,
             "post_game_insight": self.post_game_insight,
+            "captured_by_white": list(self.captured_by_white),
+            "captured_by_black": list(self.captured_by_black),
         }
         if board.is_checkmate():
             result["winner"] = "black" if board.turn == chess.WHITE else "white"

@@ -1,21 +1,13 @@
 /**
- * Visual chessboard rendered from a FEN string using Unicode chess pieces.
- * Read-only display — no interaction. Supports last-move and check highlights.
+ * Spectral chessboard — classical ivory/rosewood palette, Unicode pieces.
+ * Read-only display with last-move highlight, check highlight, and piece-slide animation.
  */
 
+import { useRef, useEffect, useState } from "react";
+
 const PIECE_MAP: Record<string, string> = {
-  K: "\u2654", // ♔
-  Q: "\u2655", // ♕
-  R: "\u2656", // ♖
-  B: "\u2657", // ♗
-  N: "\u2658", // ♘
-  P: "\u2659", // ♙
-  k: "\u265A", // ♚
-  q: "\u265B", // ♛
-  r: "\u265C", // ♜
-  b: "\u265D", // ♝
-  n: "\u265E", // ♞
-  p: "\u265F", // ♟
+  K: "\u2654", Q: "\u2655", R: "\u2656", B: "\u2657", N: "\u2658", P: "\u2659",
+  k: "\u265A", q: "\u265B", r: "\u265C", b: "\u265D", n: "\u265E", p: "\u265F",
 };
 
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
@@ -23,10 +15,7 @@ const RANKS = ["8", "7", "6", "5", "4", "3", "2", "1"];
 
 function parseFen(fen: string): (string | null)[][] {
   const placement = fen.split(" ")[0];
-  const rows = placement.split("/");
-  const board: (string | null)[][] = [];
-
-  for (const row of rows) {
+  return placement.split("/").map((row) => {
     const rank: (string | null)[] = [];
     for (const ch of row) {
       if (ch >= "1" && ch <= "8") {
@@ -35,15 +24,13 @@ function parseFen(fen: string): (string | null)[][] {
         rank.push(ch);
       }
     }
-    board.push(rank);
-  }
-  return board;
+    return rank;
+  });
 }
 
-/** Convert UCI square (e.g. "e2") to [rankIdx, fileIdx] on the board array. */
 function squareToIdx(sq: string): [number, number] {
-  const file = sq.charCodeAt(0) - 97; // a=0 .. h=7
-  const rank = 8 - parseInt(sq[1]);   // 8=0 .. 1=7
+  const file = sq.charCodeAt(0) - 97;
+  const rank = 8 - parseInt(sq[1]);
   return [rank, file];
 }
 
@@ -55,12 +42,28 @@ interface ChessBoardProps {
 
 export default function ChessBoard({ fen, lastMove, isCheck }: ChessBoardProps) {
   const board = parseFen(fen);
-
-  // Determine which side is in check from FEN
-  const turn = fen.split(" ")[1]; // "w" or "b"
+  const turn = fen.split(" ")[1];
   const kingChar = turn === "w" ? "K" : "k";
 
-  // Build sets for highlight lookups
+  // Track which square key is currently animating (piece-slide)
+  const prevLastMoveRef = useRef<{ from: string; to: string } | undefined>(undefined);
+  const [animatingKey, setAnimatingKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    const prev = prevLastMoveRef.current;
+    if (
+      lastMove &&
+      (!prev || prev.from !== lastMove.from || prev.to !== lastMove.to)
+    ) {
+      prevLastMoveRef.current = lastMove;
+      const [r, f] = squareToIdx(lastMove.to);
+      const key = `${r}-${f}`;
+      setAnimatingKey(key);
+      const timer = setTimeout(() => setAnimatingKey(null), 420);
+      return () => clearTimeout(timer);
+    }
+  }, [lastMove]);
+
   const lastMoveSquares = new Set<string>();
   if (lastMove) {
     lastMoveSquares.add(`${squareToIdx(lastMove.from)}`);
@@ -68,47 +71,91 @@ export default function ChessBoard({ fen, lastMove, isCheck }: ChessBoardProps) 
   }
 
   return (
-    <div className="flex items-start gap-0">
+    <div style={{ display: "flex", alignItems: "flex-start", gap: "0" }}>
       {/* Rank labels */}
-      <div className="flex flex-col" style={{ paddingTop: "0px" }}>
+      <div style={{ display: "flex", flexDirection: "column" }}>
         {RANKS.map((r) => (
           <div
             key={r}
-            className="flex items-center justify-center text-[10px] text-gray-500 w-4 h-12"
+            style={{
+              width: "18px",
+              height: "52px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontFamily: "var(--font-mono)",
+              fontSize: "10px",
+              color: "rgba(154,136,112,0.5)",
+            }}
           >
             {r}
           </div>
         ))}
       </div>
 
-      <div className="flex flex-col items-center">
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
         {/* Board */}
-        <div className="grid grid-cols-8 border border-emerald-900/30 rounded-lg overflow-hidden shadow-lg shadow-emerald-900/20">
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(8, 52px)",
+            borderRadius: "2px",
+            overflow: "hidden",
+            boxShadow: `
+              0 0 0 1px rgba(200, 168, 75, 0.25),
+              0 8px 40px rgba(0, 0, 0, 0.7),
+              0 0 60px rgba(130, 85, 8, 0.15)
+            `,
+          }}
+        >
           {board.map((row, rankIdx) =>
             row.map((piece, fileIdx) => {
               const isLight = (rankIdx + fileIdx) % 2 === 0;
               const key = `${[rankIdx, fileIdx]}`;
+              const cellKey = `${rankIdx}-${fileIdx}`;
               const isLastMove = lastMoveSquares.has(key);
               const isKingInCheck = isCheck && piece === kingChar;
+              const isWhitePiece = piece !== null && piece === piece.toUpperCase();
+              const isAnimating = animatingKey === cellKey;
+
+              let bg = isLight ? "#f0d9b5" : "#b58863";
+              if (isLastMove) bg = isLight ? "#cdd16f" : "#a3a832";
 
               return (
                 <div
-                  key={`${rankIdx}-${fileIdx}`}
-                  className={`flex items-center justify-center aspect-square w-12 text-2xl select-none transition-colors ${
-                    isLight
-                      ? "bg-amber-100 text-gray-900"
-                      : "bg-amber-800 text-gray-100"
-                  } ${
-                    isLastMove
-                      ? "ring-2 ring-inset ring-emerald-400/60"
-                      : ""
-                  } ${
-                    isKingInCheck
-                      ? "ring-2 ring-inset ring-red-500/80"
-                      : ""
-                  }`}
+                  key={cellKey}
+                  style={{
+                    width: "52px",
+                    height: "52px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "28px",
+                    background: bg,
+                    position: "relative",
+                    transition: "background 0.15s",
+                    outline: isKingInCheck ? "2px solid rgba(192, 57, 43, 0.9)" : "none",
+                    outlineOffset: "-2px",
+                    boxShadow: isKingInCheck
+                      ? "inset 0 0 24px rgba(192, 57, 43, 0.4)"
+                      : undefined,
+                  }}
                 >
-                  {piece ? PIECE_MAP[piece] ?? "" : ""}
+                  {piece ? (
+                    <span
+                      style={{
+                        color: isWhitePiece ? "#fffdf0" : "#1a1008",
+                        filter: isWhitePiece
+                          ? "drop-shadow(0 1px 2px rgba(0,0,0,0.5))"
+                          : "drop-shadow(0 1px 2px rgba(0,0,0,0.35))",
+                        lineHeight: 1,
+                        userSelect: "none",
+                        animation: isAnimating ? "piece-slide 0.35s ease-out" : undefined,
+                      }}
+                    >
+                      {PIECE_MAP[piece] ?? ""}
+                    </span>
+                  ) : null}
                 </div>
               );
             })
@@ -116,9 +163,17 @@ export default function ChessBoard({ fen, lastMove, isCheck }: ChessBoardProps) 
         </div>
 
         {/* File labels */}
-        <div className="grid grid-cols-8 mt-0.5" style={{ width: "384px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(8, 52px)", marginTop: "5px" }}>
           {FILES.map((f) => (
-            <div key={f} className="text-center text-[10px] text-gray-500">
+            <div
+              key={f}
+              style={{
+                textAlign: "center",
+                fontFamily: "var(--font-mono)",
+                fontSize: "10px",
+                color: "rgba(154,136,112,0.5)",
+              }}
+            >
               {f}
             </div>
           ))}

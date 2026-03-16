@@ -9,10 +9,18 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncGenerator
+from io import BytesIO
 
 import chess
 from google import genai
 from google.genai import types
+
+try:
+    from PIL import Image, ImageEnhance
+    _PILLOW_AVAILABLE = True
+except ImportError:
+    _PILLOW_AVAILABLE = False
+    logging.getLogger(__name__).warning("Pillow not installed — frame preprocessing disabled")
 
 from . import game_state
 
@@ -105,6 +113,31 @@ Important guidelines:
 - For castling: kingside = e1g1 (white) or e8g8 (black), queenside = e1c1 or e8c8.
 - For en passant: the capturing pawn moves diagonally and the captured pawn disappears.
 - If you see multiple pieces moved, it might be castling — check for that."""
+
+
+def _preprocess_frame(frame_bytes: bytes) -> bytes:
+    """Enhance contrast and sharpness of a camera frame for better board detection.
+
+    Increases contrast (1.4×) and sharpness (1.2×) to help Gemini identify
+    piece positions more reliably under varied lighting conditions.
+
+    Args:
+        frame_bytes: Raw JPEG bytes from the webcam.
+
+    Returns:
+        Enhanced JPEG bytes, or the original bytes if Pillow is unavailable.
+    """
+    if not _PILLOW_AVAILABLE:
+        return frame_bytes
+    try:
+        img = Image.open(BytesIO(frame_bytes))
+        img = ImageEnhance.Contrast(img).enhance(1.4)
+        img = ImageEnhance.Sharpness(img).enhance(1.2)
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        return buf.getvalue()
+    except Exception:
+        return frame_bytes
 
 
 def _get_new_frame(last_timestamp: float) -> tuple[bytes | None, float]:
@@ -216,6 +249,48 @@ def _validate_detected_move(fen: str, move_uci: str) -> bool:
         return False
 
 
+async def check_board_visibility() -> dict:
+    """Check RIGHT NOW whether the camera can see a chess board.
+
+    Call this when the user says they're showing you the board, or when you
+    want to confirm vision before starting a game. Returns immediately with
+    a concrete yes/no — don't claim to see anything until this says can_see=true.
+
+    Returns:
+        can_see (bool): True if a valid board is visible.
+        status (str): 'board_detected', 'no_frame', 'no_board', 'unclear', or 'hand_blocking'.
+        description (str): What was seen.
+        fen (str): Detected FEN, if board was found.
+    """
+    frame, _ = game_state.get_latest_frame()
+    if frame is None:
+        return {
+            "can_see": False,
+            "status": "no_frame",
+            "description": "No camera frames received yet. Camera may be off or not streaming.",
+        }
+
+    client = genai.Client()
+    result = await _analyze_frame(client, _preprocess_frame(frame), None)
+
+    if result.get("hand_blocking"):
+        return {"can_see": False, "status": "hand_blocking", "description": "A hand is blocking the board."}
+    if result.get("unclear"):
+        return {"can_see": False, "status": "unclear", "description": result["unclear"]}
+    if "error" in result:
+        return {"can_see": False, "status": "no_board", "description": result["error"]}
+    if "fen" in result and _validate_detected_fen(result["fen"]):
+        return {
+            "can_see": True,
+            "status": "board_detected",
+            "description": result.get("description", "Chess board detected."),
+            "fen": result["fen"],
+            "confidence": result.get("confidence", ""),
+        }
+
+    return {"can_see": False, "status": "no_board", "description": "Could not identify a chess board in the frame."}
+
+
 async def analyze_board() -> AsyncGenerator[str, None]:
     """Continuously watch the chess board through the camera and detect moves.
 
@@ -240,8 +315,6 @@ async def analyze_board() -> AsyncGenerator[str, None]:
     last_frame_timestamp: float = 0.0
     no_frame_count = 0
 
-    yield "Starting board analysis. I'll watch for your camera frames..."
-
     while True:
         await asyncio.sleep(_POLL_INTERVAL)
 
@@ -250,16 +323,16 @@ async def analyze_board() -> AsyncGenerator[str, None]:
 
         if frame is None:
             no_frame_count += 1
-            # After 15 polls (~30s) with no frames, hint the player
-            if no_frame_count == 15:
+            # After 5 polls (~10s) with no frames, hint the player
+            if no_frame_count == 5:
                 yield "I don't see any camera frames yet. Make sure your camera is turned on and pointed at the board."
             continue
 
         no_frame_count = 0
         last_frame_timestamp = new_timestamp
 
-        # Analyze the frame
-        result = await _analyze_frame(client, frame, last_fen)
+        # Preprocess and analyze the frame
+        result = await _analyze_frame(client, _preprocess_frame(frame), last_fen)
         now = time.monotonic()
 
         # --- Handle transient obstructions ---

@@ -13,8 +13,7 @@ from .chess_engine import (
 )
 from .game_state import analyze_game, reset_game, set_difficulty, toggle_coach_mode
 from .openings import recognize_opening
-from .rules import lookup_chess_rules
-from .vision import analyze_board
+from .vision import analyze_board, check_board_visibility
 
 __all__ = [
     "get_game_status",
@@ -26,7 +25,7 @@ __all__ = [
     "set_difficulty",
     "reset_game",
     "analyze_board",
-    "lookup_chess_rules",
+    "check_board_visibility",
     "recognize_opening",
     "toggle_coach_mode",
     "analyze_game",

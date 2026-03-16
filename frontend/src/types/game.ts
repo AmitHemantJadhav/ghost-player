@@ -82,4 +82,8 @@ export interface ServerGameState {
   coach_mode: boolean;
   /** One-line post-game insight shown in the game-over overlay. */
   post_game_insight: string;
+  /** Black pieces captured by white (lowercase FEN chars, e.g. "p", "n"). */
+  captured_by_white: string[];
+  /** White pieces captured by black (uppercase FEN chars, e.g. "P", "N"). */
+  captured_by_black: string[];
 }
